@@ -4,6 +4,9 @@ import "./App.css";
 import OpenAI from 'openai';
 import { BeatLoader } from "react-spinners";
 
+import { BrowserRouter as Router, Routes, Route,Link } from 'react-router-dom';
+
+import HistoryPage from './HistoryPage'; // Import the new component
 
 function debounce(func, wait) {
   let timeout;
@@ -21,7 +24,9 @@ const App = () => {
   const [translation, setTranslation] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   // Below your existing state variables, like formData and response
-  const [correctedText, setCorrectedText] = useState("");  // to store the text after corrections by OpenAI
+  const [correctedText, setCorrectedText] = useState("");  
+  const [rewrittenText, setRewrittenText] = useState(""); // New state for rewritten text
+  // to store the text after corrections by OpenAI
 
 
   const [theme, setTheme] = useState(localStorage.getItem('theme') || 'light');
@@ -29,6 +34,8 @@ const App = () => {
   const [sourceLanguage, setSourceLanguage] = useState("English");
   const [targetLanguage, setTargetLanguage] = useState("French");
   
+  const [view, setView] = useState('main');
+
 
 //new
   const [context, setContext] = useState("");
@@ -52,103 +59,168 @@ const handleInputChange = (e) => {
   }
 };
 
+//history
+const [history, setHistory] = useState(() => {
+  // Load history from local storage or initialize as an empty array
+  const savedHistory = localStorage.getItem("translationHistory");
+  return savedHistory ? JSON.parse(savedHistory) : [];
+});
+
+
+
+
+
 
   const checkGrammarAndSpelling = async () => {
-    const promptMessage = `Provide a grammatically correct version of the following sentence: '${formData.message}'`;
-
-    const response = await openai.chat.completions.create({
-      model: "gpt-4",
-      messages: [{ role: 'user', content: promptMessage }],
-      temperature: 0.3,
-      //... other parameters if needed
-    });
-
-    console.log("OpenAI Response:", response);  // Log the response
-
-    if (response.choices && response.choices[0] && response.choices[0].message) {
-      setCorrectedText(response.choices[0].message.content.trim());
-    } else {
-      console.error("Unexpected response format from OpenAI");
-    }
-  };
-
-//new 
-  const rewriteText = async () => {
-    const promptMessage = `rephrase the following sentence: '${formData.message}'`;
+    const { message } = formData;
+  
+    // Structured conversation for grammar and spelling check
+    const conversation = [
+      { role: 'system', content: 'You are an assistant skilled in English grammar and spelling correction.' },
+      { role: 'user', content: `Could you correct any grammatical or spelling errors in this sentence? '${message}'` }
+    ];
   
     try {
       const response = await openai.chat.completions.create({
-        model: "gpt-3.5-turbo",
-        messages: [{ role: 'user', content: promptMessage }],
-        temperature: 0.7,
+        model: "gpt-4",
+        messages: conversation,
+        temperature: 0.3,
+        max_tokens: 60, // Adjust based on the expected length of corrections
+        //... other parameters if needed
+      });
+  
+      console.log("OpenAI Response:", response);  // Log the response
+  
+      if (response.choices && response.choices[0] && response.choices[0].message) {
+        setCorrectedText(response.choices[0].message.content.trim());
+      } else {
+        console.error("Unexpected response format from OpenAI");
+      }
+    } catch (error) {
+      console.error("Error in grammar and spelling check:", error);
+    }
+  };
+  
+
+
+
+
+  
+ 
+
+  const rewriteText = async () => {
+    const { message } = formData;
+  
+    // Enhanced conversation structure for rephrasing
+    const conversation = [
+      { role: 'system', content: 'You are a creative writer who excels in rephrasing text while maintaining its original meaning and context.' },
+      { role: 'user', content: `Could you rephrase this text in a different way, but keep the same meaning? '${message}'` }
+    ];
+  
+    try {
+      const response = await openai.chat.completions.create({
+        model: "gpt-4", // Using GPT-4
+        messages: conversation,
+        temperature: 0.8, // Increased temperature for more creativity
         max_tokens: 60,
       });
   
+      // Handling the response
       if (response.choices && response.choices[0] && response.choices[0].message) {
-        return response.choices[0].message.content.trim(); // Return the rewritten text
+        const rewrittenText = response.choices[0].message.content.trim();
+        setRewrittenText(rewrittenText);
+        // Check if the rewritten text is too similar to the original
+        if (isTextTooSimilar(message, rewrittenText)) {
+          console.error("Rewritten text is too similar to the original.");
+          setError("Could not rewrite the text effectively. Please try again.");
+          return ""; // Handle the similarity issue
+        }
+  
+        return rewrittenText; // Return the rewritten text
       } else {
         console.error("Unexpected response format from OpenAI");
         setError("Could not rewrite the text. Please try again.");
-        return ""; // Return an empty string if there was a problem
+        return ""; // Return an empty string in case of issues
       }
     } catch (err) {
       console.error("Error when calling OpenAI for rewriting:", err);
       setError("An error occurred while rewriting. Please check your connection and try again.");
-      return ""; // Return an empty string if there was an error
+      return ""; // Return an empty string in case of an error
     }
+  };
+  
+  const isTextTooSimilar = (original, rewritten) => {
+    // Implement a basic similarity check, e.g., Levenshtein distance or a simple string comparison
+    return original.trim() === rewritten.trim(); // This is a basic example; consider more advanced methods
   };
   
 
 
 
-
-
-
-  const translate = async () => {
-    try {
-      const { language, message } = formData;
-      let promptMessage = `Translate this from ${sourceLanguage} to ${targetLanguage}: ${formData.message}`;
-      if (context) {
-        promptMessage = `${context}: ${message}`;
-      }
-      const response = await openai.chat.completions.create({
-        model: "gpt-3.5-turbo",
-        messages: [{ role: 'user', content: `Translate this into ${language}: ${promptMessage}` }],
-
-        temperature: 0.3,
-        max_tokens: 100,
-        top_p: 1.0,
-        frequency_penalty: 0.0,
-        presence_penalty: 0.0,
-      });
-      if (response.choices && response.choices[0].message.content) {
-        const translatedText = response.choices[0].message.content.trim();
-        setTranslation(translatedText);
-      } else {
-        setError("Translation failed. Please try again.");
-      }
-    } catch (error) {
-      setError("An error occurred. Please check your connection and try again.");
-    } finally {
-      setIsLoading(false);
+const translate = async () => {
+  try {
+    const { language, message } = formData;
+    let promptMessage = `Translate this from ${sourceLanguage} to ${targetLanguage}: ${message}`;
+    if (context) {
+      promptMessage = `${context}: ${message}`;
     }
-  };
+
+    // Structured conversation for translation
+    const conversation = [
+      { role: 'system', content: `You are a multilingual translator  fluent in ${sourceLanguage} and ${targetLanguage} and knows modern words also.` },
+      { role: 'user', content: promptMessage }
+    ];
+
+    const response = await openai.chat.completions.create({
+      model: "gpt-4",
+      messages: conversation,
+      temperature: 0.3,
+      max_tokens: 100,
+      top_p: 1.0,
+      frequency_penalty: 0.0,
+      presence_penalty: 0.0,
+    });
+
+    if (response.choices && response.choices[0].message.content) {
+      const translatedText = response.choices[0].message.content.trim();
+      setTranslation(translatedText);
+
+      // Update history with the new translation
+      const newHistoryEntry = {
+        id: Date.now(),
+        sourceText: message,
+        translatedText: translatedText,
+        sourceLanguage: sourceLanguage,
+        targetLanguage: targetLanguage,
+        timestamp: new Date().toISOString()
+      };
+      updateHistory(newHistoryEntry);
+    } else {
+      setError("Translation failed. Please try again.");
+    }
+  } catch (error) {
+    setError("An error occurred. Please check your connection and try again.");
+  } finally {
+    setIsLoading(false);
+  }
+};
 
 
-//new
+
 const performAction = async () => {
   setIsLoading(true);
   let textToProcess = formData.message;
 
-  try {
+ try {
     if (action === 'rewrite' || action === 'both') {
       const rewrittenText = await rewriteText();
       if (rewrittenText) {
-        setCorrectedText(rewrittenText);
+        // Set the rewritten text using the new state variable
+        setRewrittenText(rewrittenText);
+        // Use the rewritten text for further actions if needed
         textToProcess = rewrittenText;
       } else {
-        setIsLoading(false);
-        return;
+        setError("Could not rewrite the text. Please try again.");
       }
     }
 
@@ -172,7 +244,7 @@ const performAction = async () => {
       return;
     }
     setIsLoading(true);
-    translate();
+    performAction();
   };
 
   const handleCopy = () => {
@@ -210,8 +282,35 @@ const handleLanguageSwap = () => {
 };
 
 
+//history logic
+
+
+
+const updateHistory = (newEntry) => {
+  const updatedHistory = [newEntry, ...history].slice(0, 20); // keeping only the latest 20 entries
+  setHistory(updatedHistory);
+  localStorage.setItem("translationHistory", JSON.stringify(updatedHistory));
+};
+
+const deleteEntry = (id) => {
+  const updatedHistory = history.filter(entry => entry.id !== id);
+  setHistory(updatedHistory);
+  localStorage.setItem("translationHistory", JSON.stringify(updatedHistory));
+};
+
+const clearHistory = () => {
+  setHistory([]);
+  localStorage.removeItem("translationHistory");
+};
+
+
+
   return (
+    <Router>
+    <Routes>
+      <Route path="/" element={
     <div className="container">
+     
       <h1>Translation</h1>
     
       <form onSubmit={handleOnSubmit}>
@@ -314,19 +413,19 @@ const handleLanguageSwap = () => {
         ></textarea>
 
 {/* Add this section below the textarea for the original message */}
-{correctedText && action !== 'translate' && (
-  <div className="rewriting-output">
-    <h2>Rewritten Text</h2>
-    <p>{correctedText}</p>
-  </div>
-)}
+{rewrittenText && (action === 'rewrite' || action === 'both') && (
+            <div className="rewriting-output">
+              <h2>Rewritten Text</h2>
+              <p>{rewrittenText}</p>
+            </div>
+          )}
 
 
         {/* Below the original textarea */}
         {correctedText && formData.message && (
           <div className="suggestion" onClick={() => setFormData({ ...formData, message: correctedText })}
            >
-            Did you mean: {correctedText}
+             {correctedText}
           </div>
         )}
 
@@ -350,8 +449,25 @@ const handleLanguageSwap = () => {
       <div className={`notification ${showNotification ? "active" : ""}`}>
         Copied to clipboard!
       </div>
+
+      <Link to="/history" className="view-history-button">View History</Link>
+
     </div>
-  );
+    } />
+
+    <Route path="/history" element={
+      <HistoryPage
+        history={history}
+        clearHistory={clearHistory}
+        deleteEntry={deleteEntry}
+   
+      />
+    } />
+  </Routes>
+</Router>
+);
+    
+
 };
 
 export default App;
